@@ -1,0 +1,312 @@
+#!/system/bin/sh
+
+MODDIR="/data/adb/modules/bg_manager"
+SCRIPTS="$MODDIR/scripts"
+CONFIG_DIR="$MODDIR/config"
+APPS_CONF="$CONFIG_DIR/apps.conf"
+KEEP_CONF="$CONFIG_DIR/trim_keep.conf"
+
+LOG_DIR="/data/local/tmp/bg_manager"
+PID_FILE="$LOG_DIR/main.pid"
+STATE_DIR="$LOG_DIR/state"
+RELOAD_FLAG="$LOG_DIR/reload.flag"
+RESCAN_FLAG="$LOG_DIR/rescan.flag"
+
+mkdir -p "$LOG_DIR" "$STATE_DIR"
+echo $$ > "$PID_FILE"
+
+. "$SCRIPTS/utils.sh"
+. "$SCRIPTS/guards.sh"
+. "$SCRIPTS/killer.sh"
+
+log "========== bg_manager 启动 PID=$$ =========="
+log "等待 20 秒让系统稳定..."
+sleep 20
+log "开始工作..."
+
+# ── 配置解析 ────────────────────────────────────────────────
+
+APPS_PARSED="$LOG_DIR/apps_parsed.tmp"
+
+# ========== 替换后的 load_config ==========
+load_config() {
+    log "加载配置..."
+    TIME_CONFIG=$(parse_time_config "$APPS_CONF")
+    BASE_TIME=$(echo "$TIME_CONFIG" | awk '{print $1}')
+    STEP_TIME=$(echo "$TIME_CONFIG" | awk '{print $2}')
+
+    parse_apps_config "$APPS_CONF" > "$APPS_PARSED"
+
+    local count=0
+    local valid_pkgs_tmp
+    valid_pkgs_tmp=$(mktemp)
+
+    while IFS=' ' read -r mode pkg note slot counter flags; do
+        [ -z "$pkg" ] && continue
+
+        echo "$pkg" >> "$valid_pkgs_tmp"
+
+        local sf="$STATE_DIR/${pkg}.state"
+        local timeout_sec=$(( BASE_TIME + slot * STEP_TIME ))
+        [ "$timeout_sec" -lt 30 ] && timeout_sec=30
+
+        if [ ! -f "$sf" ]; then
+            printf 'last_active=%s\ncounter_left=%s\ncounter_init=%s\ntimeout=%s\nmode=%s\nflags=%s\n' \
+                "$(date +%s)" "$counter" "$counter" \
+                "$timeout_sec" "$mode" "$flags" > "$sf"
+        else
+            sed -i \
+                -e "s/^timeout=.*/timeout=${timeout_sec}/" \
+                -e "s/^mode=.*/mode=${mode}/" \
+                -e "s/^flags=.*/flags=${flags}/" \
+                "$sf"
+
+            local old_init
+            old_init=$(grep '^counter_init=' "$sf" 2>/dev/null | cut -d'=' -f2)
+            if [ "$old_init" != "$counter" ]; then
+                sed -i \
+                    -e "s/^counter_left=.*/counter_left=${counter}/" \
+                    -e "s/^counter_init=.*/counter_init=${counter}/" \
+                    "$sf"
+            fi
+        fi
+
+        count=$(( count + 1 ))
+    done < "$APPS_PARSED"
+
+    # 清理已经不在当前启用配置中的旧 state / label
+    for sf in "$STATE_DIR"/*.state; do
+        [ -f "$sf" ] || continue
+        local old_pkg
+        old_pkg=$(basename "$sf" .state)
+        if ! grep -qxF "$old_pkg" "$valid_pkgs_tmp"; then
+            log "清理旧状态文件: $old_pkg"
+            rm -f "$sf" "$STATE_DIR/${old_pkg}.label"
+        fi
+    done
+
+    rm -f "$valid_pkgs_tmp"
+
+    log "配置加载完成: BASE=${BASE_TIME}s STEP=${STEP_TIME}s 共${count}个App"
+    rm -f "$RELOAD_FLAG"
+}
+# ========== 替换结束 ==========
+
+# ── state 读写 ───────────────────────────────────────────────
+
+state_get() {
+    grep "^${2}=" "$STATE_DIR/${1}.state" 2>/dev/null | cut -d'=' -f2
+}
+
+state_set() {
+    local sf="$STATE_DIR/${1}.state"
+    if grep -q "^${2}=" "$sf" 2>/dev/null; then
+        sed -i "s/^${2}=.*/${2}=${3}/" "$sf"
+    else
+        echo "${2}=${3}" >> "$sf"
+    fi
+}
+
+# ── 核心处理 ─────────────────────────────────────────────────
+
+do_process_with_counter() {
+    local pkg="$1" effective_mode="$2"
+    if [ "$effective_mode" = "K" ]; then
+        do_kill "$pkg"
+        state_set "$pkg" last_active "$(date +%s)"
+        return
+    fi
+    local counter_left counter_init
+    counter_left=$(state_get "$pkg" counter_left)
+    counter_init=$(state_get "$pkg" counter_init)
+    if [ "${counter_init:-0}" -gt 0 ]; then
+        counter_left=$(( counter_left - 1 ))
+        if [ "$counter_left" -le 0 ]; then
+            log "[$pkg] 计数器归零，改为强杀"
+            do_kill "$pkg"
+            state_set "$pkg" counter_left "$counter_init"
+        else
+            do_trim "$pkg" "$KEEP_CONF"
+            state_set "$pkg" counter_left "$counter_left"
+        fi
+    else
+        do_trim "$pkg" "$KEEP_CONF"
+    fi
+    state_set "$pkg" last_active "$(date +%s)"
+}
+
+process_pkg() {
+    local pkg="$1"
+    local sf="$STATE_DIR/${pkg}.state"
+    [ -f "$sf" ] || return
+    is_pkg_running "$pkg" || return
+
+    local mode flags
+    mode=$(state_get "$pkg" mode)
+    flags=$(state_get "$pkg" flags)
+
+    local effective_mode="$mode"
+    if [ "$mode" = "M" ]; then
+        if has_audio_focus "$pkg"; then
+            log "[$pkg] M模式有音频焦点，跳过并刷新计时"
+            state_set "$pkg" last_active "$(date +%s)"
+            return
+        fi
+        effective_mode="T"
+        flags=$(echo "$flags" | sed 's/^\(.\).\(.*\)/\10\2/')
+    fi
+
+    should_skip "$pkg" "$flags" "$effective_mode" && return
+    do_process_with_counter "$pkg" "$effective_mode"
+}
+
+check_all_apps() {
+    local now checked=0 processed=0
+    now=$(date +%s)
+    while IFS=' ' read -r mode pkg note slot counter flags; do
+        local sf="$STATE_DIR/${pkg}.state"
+        [ -f "$sf" ] || continue
+        local last_active timeout elapsed
+        last_active=$(state_get "$pkg" last_active)
+        timeout=$(state_get "$pkg" timeout)
+        elapsed=$(( now - last_active ))
+        checked=$(( checked + 1 ))
+        if [ "$elapsed" -ge "$timeout" ]; then
+            process_pkg "$pkg"
+            processed=$(( processed + 1 ))
+        fi
+    done < "$APPS_PARSED"
+    [ "$processed" -gt 0 ] && log "本轮: 检查${checked}个，处理${processed}个"
+}
+
+next_sleep_sec() {
+    local now min_remaining=120
+    now=$(date +%s)
+    while IFS=' ' read -r mode pkg note slot counter flags; do
+        local sf="$STATE_DIR/${pkg}.state"
+        [ -f "$sf" ] || continue
+        is_pkg_running "$pkg" || continue
+        local last_active timeout remaining
+        last_active=$(state_get "$pkg" last_active)
+        timeout=$(state_get "$pkg" timeout)
+        remaining=$(( last_active + timeout - now ))
+        [ "$remaining" -lt "$min_remaining" ] && min_remaining="$remaining"
+    done < "$APPS_PARSED"
+    [ "$min_remaining" -lt 10 ]  && min_remaining=10
+    [ "$min_remaining" -gt 120 ] && min_remaining=120
+    echo "$min_remaining"
+}
+
+# ── 灭屏监听 ────────────────────────────────────────────────
+
+monitor_screen_off() {
+    local last_state="on"
+    while true; do
+        if is_screen_on; then
+            last_state="on"
+        elif [ "$last_state" = "on" ]; then
+            last_state="off"
+            log "屏幕熄灭，立即检查"
+            check_all_apps
+            sleep 3
+            check_all_apps
+        fi
+        sleep 2
+    done
+}
+
+# ── logcat 监听 ──────────────────────────────────────────────
+
+handle_front_changed() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return
+    [ -f "$STATE_DIR/${pkg}.state" ] || return
+    state_set "$pkg" last_active "$(date +%s)"
+    log "前台切换到 [$pkg]，重置计时器"
+}
+
+handle_proc_start() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return
+    [ -f "$STATE_DIR/${pkg}.state" ] || return
+    log "[$pkg] 进程启动，5秒后检查"
+    ( sleep 5; process_pkg "$pkg" ) &
+}
+
+monitor_logcat() {
+    local retry_delay=5 max_delay=120
+    while true; do
+        log "logcat 监听启动"
+        logcat -b events -b main \
+               -s am_proc_start ActivityTaskManager 2>/dev/null \
+        | while IFS= read -r line; do
+            case "$line" in
+                *am_proc_start*)
+                    case "$line" in *:push*|*:pushservice*) continue ;; esac
+                    pkg=$(echo "$line" \
+                        | grep -oE '[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+' \
+                        | grep -v '^android\.' | head -1)
+                    handle_proc_start "$pkg"
+                    ;;
+                *ActivityTaskManager*"Displayed"*|*ActivityTaskManager*"START"*)
+                    pkg=$(echo "$line" \
+                        | grep -oE '[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+' \
+                        | grep -v '^android\.' | head -1)
+                    handle_front_changed "$pkg"
+                    ;;
+            esac
+        done
+        log "logcat 断开，${retry_delay}s 后重试"
+        sleep "$retry_delay"
+        retry_delay=$(( retry_delay * 2 ))
+        [ "$retry_delay" -gt "$max_delay" ] && retry_delay="$max_delay"
+    done
+}
+
+# ── flag 检查 ────────────────────────────────────────────────
+
+check_flags() {
+    if [ -f "$RELOAD_FLAG" ]; then
+        log "执行热重载"
+        load_config
+    fi
+    if [ -f "$RESCAN_FLAG" ]; then
+        log "执行重新扫描"
+        rm -f "$RESCAN_FLAG"
+        sh "$SCRIPTS/init_config.sh"
+        load_config
+    fi
+}
+
+# ── 清理 ─────────────────────────────────────────────────────
+
+cleanup() {
+    log "退出，清理子进程..."
+    kill "$SCREEN_PID" "$LOGCAT_PID" 2>/dev/null
+    rm -f "$PID_FILE"
+    log "========== bg_manager 退出 =========="
+    exit 0
+}
+
+trap cleanup INT TERM
+
+# ── 启动 ────────────────────────────────────────────────────
+
+load_config
+
+monitor_screen_off &
+SCREEN_PID=$!
+log "灭屏监听 PID=$SCREEN_PID"
+
+monitor_logcat &
+LOGCAT_PID=$!
+log "logcat 监听 PID=$LOGCAT_PID"
+
+log "主定时循环启动"
+while true; do
+    check_flags
+    check_all_apps
+    sleep_sec=$(next_sleep_sec)
+    log "下次检查 ${sleep_sec}s 后"
+    sleep "$sleep_sec"
+done

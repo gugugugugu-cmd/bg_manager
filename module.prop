@@ -1,0 +1,7 @@
+id=bg_manager
+name=Background Manager
+version=v1.0.0
+versionCode=1
+author=bomo
+description=后台应用定时瘦身/清理，保留推送进程
+minKsuVersion=11633

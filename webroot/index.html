@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>后台管家</title>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #242424;
+    --border: #2e2e2e;
+    --text: #e8e8e8;
+    --text2: #888;
+    --accent: #4f9eff;
+    --green: #4caf7d;
+    --red: #f06060;
+    --yellow: #f0b060;
+    --radius: 10px;
+    --font: -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    min-height: 100vh;
+  }
+  .topbar {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .topbar h1 { font-size: 16px; font-weight: 600; flex: 1; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text2); transition: background 0.3s;
+  }
+  .status-dot.running { background: var(--green); }
+  .status-dot.stopped { background: var(--red); }
+  .tabs {
+    display: flex;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 10px 18px; cursor: pointer;
+    color: var(--text2); font-size: 13px;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .page { display: none; padding: 16px; }
+  .page.active { display: block; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px; margin-bottom: 12px;
+  }
+  .card-title {
+    font-size: 12px; color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 10px;
+  }
+  .stat-row { display: flex; gap: 10px; margin-bottom: 12px; }
+  .stat {
+    flex: 1; background: var(--surface2);
+    border-radius: 8px; padding: 10px 12px; text-align: center;
+  }
+  .stat-val { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    padding: 8px 16px; border: none; border-radius: 8px;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.96); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-danger  { background: var(--red);    color: #fff; }
+  .btn-warn    { background: var(--yellow); color: #111; }
+  .btn-ghost   { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .app-filter { display: flex; gap: 8px; margin-bottom: 10px; }
+  .app-filter input,
+  .app-filter select {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px;
+    color: var(--text); font-size: 13px; outline: none;
+  }
+  .app-filter input { flex: 1; }
+  .app-list { display: flex; flex-direction: column; gap: 6px; }
+  .app-item {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .app-item.disabled { opacity: 0.45; }
+  .app-info { flex: 1; min-width: 0; }
+  .app-name {
+    font-size: 13px; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .app-pkg { font-size: 11px; color: var(--text2); margin-top: 1px; }
+  .app-meta { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .badge {
+    font-size: 11px; font-weight: 600;
+    padding: 2px 7px; border-radius: 4px;
+  }
+  .badge-T { background: #1a3a5c; color: var(--accent); }
+  .badge-K { background: #3a1a1a; color: var(--red); }
+  .badge-M { background: #1a3a2a; color: var(--green); }
+  .running-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text2); flex-shrink: 0;
+  }
+  .running-dot.on { background: var(--green); }
+  .toggle-btn {
+    width: 36px; height: 20px; background: var(--border);
+    border-radius: 10px; position: relative; cursor: pointer;
+    transition: background 0.2s; flex-shrink: 0; border: none;
+  }
+  .toggle-btn.on { background: var(--accent); }
+  .toggle-btn::after {
+    content: ''; position: absolute;
+    width: 14px; height: 14px; background: #fff;
+    border-radius: 50%; top: 3px; left: 3px; transition: left 0.2s;
+  }
+  .toggle-btn.on::after { left: 19px; }
+  .edit-btn {
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text2);
+    padding: 4px 8px; font-size: 11px; cursor: pointer;
+  }
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7); z-index: 200;
+    align-items: flex-end; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 20px 16px; width: 100%; max-width: 600px;
+    max-height: 85vh; overflow-y: auto;
+  }
+  .modal h3 { font-size: 15px; margin-bottom: 14px; }
+  .form-row { margin-bottom: 12px; }
+  .form-row label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; }
+  .form-row select,
+  .form-row input {
+    width: 100%; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; color: var(--text); font-size: 13px; outline: none;
+  }
+  .flags-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .flag-item {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+  }
+  .flag-item.on { border-color: var(--accent); }
+  .flag-item span { font-size: 12px; }
+  .modal-btns { display: flex; gap: 8px; margin-top: 16px; }
+  .modal-btns .btn { flex: 1; }
+  .log-box {
+    background: #0a0a0a; border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px; line-height: 1.6; color: #b0b0b0;
+    height: 360px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .log-trim { color: var(--accent); }
+  .log-kill { color: var(--red); }
+  .log-sep  { color: #444; }
+  .conf-editor {
+    width: 100%; background: #0a0a0a;
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; font-family: 'Courier New', monospace;
+    font-size: 12px; line-height: 1.6; color: #b0b0b0;
+    height: 400px; resize: vertical; outline: none;
+  }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #333; color: #fff;
+    padding: 9px 18px; border-radius: 20px;
+    font-size: 13px; opacity: 0;
+    transition: all 0.25s; pointer-events: none;
+    z-index: 999; white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .progress-bar {
+    height: 3px; background: var(--border);
+    border-radius: 2px; overflow: hidden; margin-top: 6px;
+  }
+  .progress-fill {
+    height: 100%; background: var(--accent);
+    border-radius: 2px; transition: width 0.3s;
+  }
+  .err { color: var(--red); font-size: 12px; padding: 4px 0; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="status-dot" id="statusDot"></div>
+  <h1>后台管家</h1>
+  <span id="statusText" style="font-size:12px;color:var(--text2)">检查中...</span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="overview">概览</div>
+  <div class="tab" data-tab="apps">应用</div>
+  <div class="tab" data-tab="oplog">操作日志</div>
+  <div class="tab" data-tab="runlog">运行日志</div>
+</div>
+
+<div class="page active" id="tab-overview">
+  <div class="card">
+    <div class="card-title">服务状态</div>
+    <div class="stat-row">
+      <div class="stat">
+        <div class="stat-val" id="statEnabled">-</div>
+        <div class="stat-label">已启用 App</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="statRunning">-</div>
+        <div class="stat-label">正在运行</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="statPid">-</div>
+        <div class="stat-label">PID</div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="svcAction('reload')">热重载</button>
+      <button class="btn btn-warn"    onclick="svcAction('rescan')">重新扫描</button>
+      <button class="btn btn-ghost"   onclick="svcAction('restart')">重启服务</button>
+      <button class="btn btn-danger"  onclick="svcAction('stop')">停止</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">最近操作</div>
+    <div class="log-box" id="recentOps">加载中...</div>
+  </div>
+  <div class="card">
+    <div class="card-title">App 计时状态</div>
+    <div id="appStateList">加载中...</div>
+  </div>
+</div>
+
+<div class="page" id="tab-apps">
+  <div class="app-filter">
+    <input type="text" id="appSearch" placeholder="搜索包名或备注..." oninput="renderAppList()">
+    <select id="appFilter" onchange="renderAppList()">
+      <option value="all">全部</option>
+      <option value="enabled">已启用</option>
+      <option value="disabled">已禁用</option>
+    </select>
+  </div>
+  <div class="app-list" id="appList">加载中...</div>
+</div>
+
+<div class="page" id="tab-oplog">
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between">
+      <span>操作日志</span>
+      <button class="edit-btn" onclick="loadOpLog()">刷新</button>
+    </div>
+    <div class="log-box" id="oplogBox">加载中...</div>
+  </div>
+</div>
+
+<div class="page" id="tab-runlog">
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between">
+      <span>运行日志</span>
+      <button class="edit-btn" onclick="loadRunLog()">刷新</button>
+    </div>
+    <div class="log-box" id="runlogBox">加载中...</div>
+  </div>
+</div>
+
+<!-- 编辑弹窗，新增保留进程编辑区 -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <h3 id="editModalTitle">编辑应用</h3>
+    <div class="form-row">
+      <label>备注名称（显示在列表里）</label>
+      <input type="text" id="editNote" placeholder="自定义名称，不能含空格">
+    </div>
+    <div class="form-row">
+      <label>处理方式</label>
+      <select id="editMode">
+        <option value="T">T — 瘦身（杀子进程）</option>
+        <option value="K">K — 强杀（force-stop）</option>
+        <option value="M">M — 音乐类（有音频时跳过）</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>档位（后台时间 = base + 档位 × step 秒）</label>
+      <input type="number" id="editSlot" value="0" min="-10" max="20">
+    </div>
+    <div class="form-row">
+      <label>计数器（瘦身 N 次后强杀，0 = 不启用）</label>
+      <input type="number" id="editCounter" value="0" min="0" max="99">
+    </div>
+    <div class="form-row">
+      <label>保护条件</label>
+      <div class="flags-grid">
+        <div class="flag-item" id="flag0" onclick="toggleFlag(0)"><span>🔔 通知保护</span></div>
+        <div class="flag-item" id="flag1" onclick="toggleFlag(1)"><span>🎵 音频保护</span></div>
+        <div class="flag-item" id="flag2" onclick="toggleFlag(2)"><span>🪟 小窗保护</span></div>
+      </div>
+    </div>
+    <!-- 新增：保留进程编辑区 -->
+    <div class="form-row">
+      <label>保留进程（瘦身时不杀死，一行一个）</label>
+      <textarea id="editKeepProcs"
+        style="width:100%;background:var(--surface);border:1px solid var(--border);
+               border-radius:8px;padding:9px 12px;color:var(--text);font-family:'Courier New',monospace;
+               font-size:12px;line-height:1.6;height:120px;resize:vertical;outline:none;"
+        placeholder="例如：&#10;com.tencent.mm:push&#10;com.tencent.mm.push"></textarea>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">
+        留空表示不为该应用单独保留任何进程
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost"   onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveAppEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ── KernelSU exec（同步返回字符串） ─────────────────────────
+
+function ksuExec(cmd) {
+    try {
+        const stdout = ksu.exec(cmd);
+        return { ok: true, stdout: typeof stdout === 'string' ? stdout : String(stdout ?? '') };
+    } catch (e) {
+        return { ok: false, stdout: '', error: String(e) };
+    }
+}
+
+// ── API 调用 ─────────────────────────────────────────────────
+
+const API_SH = '/data/adb/modules/bg_manager/webroot/api.sh';
+
+function api(action, ...args) {
+    const escapedArgs = args.map(a =>
+        `'${String(a).replace(/'/g, "'\\''")}'`
+    ).join(' ');
+    const cmd = `sh ${API_SH} ${action} ${escapedArgs}`.trimEnd();
+
+    const res = ksuExec(cmd);
+    if (!res.ok) {
+        return { ok: false, error: res.error };
+    }
+    const raw = res.stdout.trim();
+    if (!raw) {
+        return { ok: false, error: '无输出' };
+    }
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        return { ok: false, error: `JSON解析失败: ${raw.substring(0, 120)}` };
+    }
+}
+
+function toast(msg, duration) {
+    duration = duration || 2000;
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), duration);
+}
+
+function fmtTime(sec) {
+    sec = parseInt(sec) || 0;
+    if (sec <= 0) return '即将处理';
+    if (sec < 60)  return sec + 's';
+    return Math.floor(sec / 60) + 'm' + (sec % 60) + 's';
+}
+
+function calcTimeout(slot) {
+    const base = window._base || 60;
+    const step = window._step || 15;
+    return Math.max(30, base + parseInt(slot) * step);
+}
+
+function buildFlagDesc(flags) {
+    const parts = [];
+    if (flags && flags[0] === '1') parts.push('通知');
+    if (flags && flags[1] === '1') parts.push('音频');
+    if (flags && flags[2] === '1') parts.push('小窗');
+    return parts.length ? parts.join('/') + '保护' : '';
+}
+
+function colorizeLog(text, type) {
+    if (!text) return '';
+    return text.split('\\n').map(line => {
+        if (!line) return '';
+        const escaped = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        if (line.includes('TRIM'))          return `<span class="log-trim">${escaped}</span>`;
+        if (line.includes('KILL'))          return `<span class="log-kill">${escaped}</span>`;
+        if (line.startsWith('---'))         return `<span class="log-sep">${escaped}</span>`;
+        return escaped;
+    }).join('\n');
+}
+
+// ── 标签页 ───────────────────────────────────────────────────
+
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        switch (tab.dataset.tab) {
+            case 'overview': loadOverview(); break;
+            case 'apps':     loadApps();     break;
+            case 'oplog':    loadOpLog();    break;
+            case 'runlog':   loadRunLog();   break;
+        }
+    });
+});
+
+// ── 概览 ─────────────────────────────────────────────────────
+
+function loadOverview() {
+    loadStatus();
+    loadRecentOps();
+    loadAppState();
+}
+
+function loadStatus() {
+    const r = api('status');
+    const dot = document.getElementById('statusDot');
+    const txt = document.getElementById('statusText');
+    if (r.ok) {
+        const d = r.data;
+        dot.className = 'status-dot ' + (d.running ? 'running' : 'stopped');
+        txt.textContent = d.running ? '运行中' : '已停止';
+        document.getElementById('statEnabled').textContent = d.enabled;
+        document.getElementById('statPid').textContent = d.running ? d.pid : '-';
+    } else {
+        dot.className = 'status-dot stopped';
+        txt.textContent = '获取失败: ' + r.error;
+    }
+}
+
+function loadRecentOps() {
+    const box = document.getElementById('recentOps');
+    const r = api('oplog', '30');
+    if (r.ok && r.data) {
+        box.innerHTML = colorizeLog(r.data, 'op');
+        box.scrollTop = box.scrollHeight;
+    } else {
+        box.textContent = '暂无操作记录';
+    }
+}
+
+function loadAppState() {
+    const el = document.getElementById('appStateList');
+    const statRunning = document.getElementById('statRunning');
+    const r = api('appstate');
+
+    if (!r.ok || !r.data || !r.data.length) {
+        el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:4px 0">暂无配置的 App</div>';
+        statRunning.textContent = '0';
+        return;
+    }
+
+    // 统计运行中的数量
+    const runningCount = r.data.filter(a => a.running).length;
+    statRunning.textContent = runningCount;
+
+    // 全部显示，运行中的正常显示，未运行的置灰
+    el.innerHTML = r.data.map(a => {
+        const isRunning = a.running;
+        const pct = isRunning
+            ? Math.max(0, Math.min(100, 100 - (parseInt(a.remaining) / parseInt(a.timeout) * 100)))
+            : 0;
+        const opacity = isRunning ? '1' : '0.4';
+        const timeText = isRunning ? fmtTime(a.remaining) : '未运行';
+        const barColor = isRunning ? 'var(--accent)' : 'var(--text2)';
+
+        return `<div style="margin-bottom:10px;opacity:${opacity}">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <span style="font-size:12px;color:var(--text)">${a.pkg}</span>
+                <span style="font-size:11px;color:var(--text2)">${timeText}</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width:${pct}%;background:${barColor}"></div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ── 服务控制 ─────────────────────────────────────────────────
+
+function svcAction(action) {
+    const labels = {
+        reload: '热重载中...', rescan: '重新扫描中...',
+        restart: '重启中...', stop: '停止中...'
+    };
+    toast(labels[action] || action);
+    const r = api(action);
+    if (r.ok) {
+        const msgs = {
+            reload: '热重载成功', rescan: '扫描完成',
+            restart: '服务已重启', stop: '服务已停止'
+        };
+        toast(msgs[action] || '操作成功');
+        setTimeout(loadStatus, 1500);
+    } else {
+        toast('失败: ' + r.error);
+    }
+}
+
+// ── 应用列表 ─────────────────────────────────────────────────
+
+var allApps   = [];
+var appStates = {};
+
+function loadApps() {
+    const confR  = api('get_apps_conf');
+    const stateR = api('appstate');
+
+    appStates = {};
+    if (stateR.ok && stateR.data) {
+        stateR.data.forEach(function(s) { appStates[s.pkg] = s; });
+    }
+
+    allApps = [];
+    if (!confR.ok) {
+        document.getElementById('appList').innerHTML =
+            '<div class="err">读取配置失败: ' + confR.error + '</div>';
+        return;
+    }
+
+    const lines = confR.data.replace(/\\n/g, '\n').split('\n');
+    lines.forEach(function(line) {
+        var m = line.match(/^([TKM])\s+(\S+)\s+(\S+)\s+([-\d]+),(\d+)\s+(\d{8})/);
+        if (m) {
+            allApps.push({ enabled:true,  mode:m[1], pkg:m[2], note:m[3], slot:parseInt(m[4]), counter:parseInt(m[5]), flags:m[6] });
+            return;
+        }
+        m = line.match(/^#\s*([TKM])\s+(\S+)\s+(\S+)\s+([-\d]+),(\d+)\s+(\d{8})/);
+        if (m) {
+            allApps.push({ enabled:false, mode:m[1], pkg:m[2], note:m[3], slot:parseInt(m[4]), counter:parseInt(m[5]), flags:m[6] });
+        }
+    });
+
+    renderAppList();
+}
+
+function renderAppList() {
+    const search = (document.getElementById('appSearch').value || '').toLowerCase();
+    const filter = document.getElementById('appFilter').value;
+
+    const list = allApps.filter(function(a) {
+        if (filter === 'enabled'  && !a.enabled) return false;
+        if (filter === 'disabled' &&  a.enabled) return false;
+        if (search && !a.pkg.toLowerCase().includes(search)
+                   && !a.note.toLowerCase().includes(search)) return false;
+        return true;
+    });
+
+    if (!list.length) {
+        document.getElementById('appList').innerHTML =
+            '<div style="color:var(--text2);text-align:center;padding:20px">无匹配结果</div>';
+        return;
+    }
+
+    document.getElementById('appList').innerHTML = list.map(function(a) {
+        const st        = appStates[a.pkg];
+        const isRunning = st && st.running;
+        const remaining = st ? fmtTime(st.remaining) : '-';
+        const flagDesc  = buildFlagDesc(a.flags);
+        const timeout   = calcTimeout(a.slot);
+        return '<div class="app-item ' + (a.enabled ? '' : 'disabled') + '" id="item-' + a.pkg + '">' +
+            '<div class="running-dot ' + (isRunning ? 'on' : '') + '"></div>' +
+            '<div class="app-info">' +
+              '<div class="app-name"><span class="badge badge-' + a.mode + '">' + a.mode + '</span>&nbsp;' + a.note + '</div>' +
+              '<div class="app-pkg">' + a.pkg + '</div>' +
+              '<div class="app-meta">' +
+                (a.enabled ? ('超时:' + timeout + 's · 剩余:' + remaining) : '已禁用') +
+                (a.counter > 0 ? (' · 计数:' + (st ? st.counter_left : a.counter) + '/' + a.counter) : '') +
+                (flagDesc ? (' · ' + flagDesc) : '') +
+              '</div>' +
+            '</div>' +
+            '<button class="edit-btn" onclick="openEdit(\'' + a.pkg + '\')">编辑</button>' +
+            '<button class="toggle-btn ' + (a.enabled ? 'on' : '') + '" onclick="toggleApp(\'' + a.pkg + '\')"></button>' +
+            '</div>';
+    }).join('');
+}
+
+function toggleApp(pkg) {
+    const r = api('toggle_app', pkg);
+    if (r.ok) {
+        toast(r.data === 'enabled' ? '已启用' : '已禁用');
+        loadApps();
+    } else {
+        toast('操作失败: ' + r.error);
+    }
+}
+
+// ── 编辑弹窗（含备注和保留进程）──────────────────────────────
+
+var editingPkg = null;
+var flagState  = [false, false, false];
+
+function openEdit(pkg) {
+    const app = allApps.find(function(a) { return a.pkg === pkg; });
+    if (!app) return;
+    editingPkg = pkg;
+
+    document.getElementById('editModalTitle').textContent = app.note + ' (' + app.pkg + ')';
+    document.getElementById('editNote').value = app.note;
+    document.getElementById('editMode').value    = app.mode;
+    document.getElementById('editSlot').value    = app.slot;
+    document.getElementById('editCounter').value = app.counter;
+
+    flagState = [
+        app.flags[0] === '1',
+        app.flags[1] === '1',
+        app.flags[2] === '1'
+    ];
+    updateFlagUI();
+
+    // 加载该应用在 trim_keep.conf 中的保留进程
+    loadKeepProcsForPkg(pkg);
+
+    document.getElementById('editModal').classList.add('open');
+}
+
+function loadKeepProcsForPkg(pkg) {
+    const r = api('get_keep_procs', pkg);
+    const ta = document.getElementById('editKeepProcs');
+    if (r.ok && r.data !== undefined) {
+        ta.value = r.data || '';
+    } else {
+        ta.value = '';
+    }
+}
+
+function closeModal() {
+    document.getElementById('editModal').classList.remove('open');
+    editingPkg = null;
+}
+
+function toggleFlag(i) {
+    flagState[i] = !flagState[i];
+    updateFlagUI();
+}
+
+function updateFlagUI() {
+    flagState.forEach(function(on, i) {
+        document.getElementById('flag' + i).classList.toggle('on', on);
+    });
+}
+
+function buildFlags() {
+    return flagState.map(function(f) { return f ? '1' : '0'; }).join('') + '00000';
+}
+
+function saveAppEdit() {
+    if (!editingPkg) return;
+
+    let note = (document.getElementById('editNote').value || '').trim();
+    if (!note) {
+        toast('备注名称不能为空');
+        return;
+    }
+    note = note.replace(/\s+/g, '_');
+
+    const mode    = document.getElementById('editMode').value;
+    const slot    = document.getElementById('editSlot').value;
+    const counter = document.getElementById('editCounter').value;
+    const flags   = buildFlags();
+    const keepRaw = document.getElementById('editKeepProcs').value;
+
+    // 先保存 apps.conf 配置
+    const r1 = api('update_app', editingPkg, mode, slot, counter, flags, note);
+    if (!r1.ok) {
+        toast('保存配置失败: ' + r1.error);
+        return;
+    }
+
+    // 保存保留进程到 trim_keep.conf
+    let keepEncoded;
+    try {
+        keepEncoded = btoa(unescape(encodeURIComponent(keepRaw)));
+    } catch (e) {
+        toast('编码保留进程失败: ' + e);
+        return;
+    }
+    const r2 = api('save_keep_procs', editingPkg, note, keepEncoded);
+    if (!r2.ok) {
+        toast('配置已保存，但保留进程更新失败: ' + r2.error);
+    } else {
+        toast('保存成功');
+    }
+
+    closeModal();
+    loadApps();
+}
+
+document.getElementById('editModal').addEventListener('click', function(e) {
+    if (e.target === e.currentTarget) closeModal();
+});
+
+// ── trim_keep.conf 内联编辑（全局）───────────────────────────
+
+
+// ── 日志 ─────────────────────────────────────────────────────
+
+function loadOpLog() {
+    const box = document.getElementById('oplogBox');
+    box.textContent = '加载中...';
+    const r = api('oplog', '200');
+    if (r.ok && r.data) {
+        box.innerHTML = colorizeLog(r.data, 'op');
+        box.scrollTop = box.scrollHeight;
+    } else {
+        box.textContent = '暂无操作记录';
+    }
+}
+
+function loadRunLog() {
+    const box = document.getElementById('runlogBox');
+    box.textContent = '加载中...';
+    const r = api('runlog', '150');
+    if (r.ok && r.data) {
+        box.innerHTML = colorizeLog(r.data, 'run');
+        box.scrollTop = box.scrollHeight;
+    } else {
+        box.textContent = '暂无日志';
+    }
+}
+
+// ── 初始化 ───────────────────────────────────────────────────
+
+function init() {
+    const logR = api('runlog', '30');
+    if (logR.ok && logR.data) {
+        const m = logR.data.match(/BASE=(\d+)s STEP=(\d+)s/);
+        if (m) {
+            window._base = parseInt(m[1]);
+            window._step = parseInt(m[2]);
+        }
+    }
+    loadOverview();
+}
+
+setInterval(function() {
+    const activeTab = document.querySelector('.tab.active');
+    if (activeTab && activeTab.dataset.tab === 'overview') {
+        loadOverview();
+    }
+}, 30000);
+
+init();
+</script>
+</body>
+</html>
