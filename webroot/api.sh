@@ -1,26 +1,21 @@
 #!/system/bin/sh
-# WebUI 后端接口
-# 用法: api.sh <action> [args...]
-
-# stderr 重定向到日志，不干扰 stdout 的 JSON 输出
-exec 2>/data/local/tmp/bg_manager/api_err.log
+exec 2>/data/adb/modules/bg_manager/logs/api_err.log
 
 MODDIR="/data/adb/modules/bg_manager"
 CONFIG_DIR="$MODDIR/config"
 SCRIPTS="$MODDIR/scripts"
 APPS_CONF="$CONFIG_DIR/apps.conf"
 KEEP_CONF="$CONFIG_DIR/trim_keep.conf"
-LOG_DIR="/data/local/tmp/bg_manager"
+LOG_DIR="$MODDIR/logs"
 PID_FILE="$LOG_DIR/main.pid"
 STATE_DIR="$LOG_DIR/state"
 OP_LOG="$LOG_DIR/operations.log"
-RUN_LOG="$LOG_DIR/bg_manager.log"
+PROC_LOG="$LOG_DIR/process.log"
 RELOAD_FLAG="$LOG_DIR/reload.flag"
 RESCAN_FLAG="$LOG_DIR/rescan.flag"
 
 is_numeric() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac }
 
-# 输出 JSON
 ok()   { printf '{"ok":true,"data":%s}\n' "$1"; }
 fail() { printf '{"ok":false,"error":"%s"}\n' "$1"; }
 
@@ -44,32 +39,25 @@ get_pid() {
     return 1
 }
 
-# ========== 新增辅助函数 ==========
 pkg_is_running() {
     local pkg="$1"
     ps -A 2>/dev/null | awk -v p="$pkg" '
         {
             n = $NF
             if (n == p || index(n, p ":") == 1) {
-                found = 1
-                exit
+                found = 1; exit
             }
         }
-        END {
-            exit(found ? 0 : 1)
-        }
+        END { exit(found ? 0 : 1) }
     '
 }
-# ========== 辅助函数结束 ==========
 
-# 转义 JSON 字符串内容
 to_json_str() {
     sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}' | tr -d '\n'
 }
 
 case "$1" in
 
-# ── 服务状态 ────────────────────────────────────────────────
 status)
     pid=$(get_pid)
     pid_ok=$?
@@ -80,19 +68,11 @@ status)
         pid=0
     fi
     enabled=$(grep -cE '^[TKM] ' "$APPS_CONF" 2>/dev/null || echo 0)
-    last_log=$(tail -n 1 "$RUN_LOG" 2>/dev/null | to_json_str)
+    last_log=$(tail -n 1 "$OP_LOG" 2>/dev/null | to_json_str)
     ok "{\"running\":${running},\"pid\":${pid},\"enabled\":${enabled},\"last_log\":\"${last_log}\"}"
     ;;
 
-# ── 运行日志 ────────────────────────────────────────────────
-runlog)
-    lines="${2:-80}"
-    is_numeric "$lines" || lines=80
-    content=$(tail -n "$lines" "$RUN_LOG" 2>/dev/null | to_json_str)
-    ok "\"${content}\""
-    ;;
-
-# ── 操作日志 ────────────────────────────────────────────────
+# 操作日志：控制操作记录
 oplog)
     lines="${2:-100}"
     is_numeric "$lines" || lines=100
@@ -100,18 +80,23 @@ oplog)
     ok "\"${content}\""
     ;;
 
-# ── App 状态列表（替换后版本）─────────────────────────────────
+# 运行日志：进程处理记录
+runlog)
+    lines="${2:-150}"
+    is_numeric "$lines" || lines=150
+    content=$(tail -n "$lines" "$PROC_LOG" 2>/dev/null | to_json_str)
+    ok "\"${content}\""
+    ;;
+
 appstate)
     now=$(date +%s)
     result='['
     first=true
-
     tmp_apps=$(mktemp)
     grep -E '^[TKM] ' "$APPS_CONF" 2>/dev/null > "$tmp_apps"
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
-
         mode=$(echo "$line" | awk '{print $1}')
         pkg=$(echo "$line"  | awk '{print $2}')
         [ -z "$pkg" ] && continue
@@ -119,36 +104,24 @@ appstate)
         sf="$STATE_DIR/${pkg}.state"
         if [ -f "$sf" ]; then
             last_active=$(grep '^last_active=' "$sf" 2>/dev/null | cut -d'=' -f2)
-            timeout=$(grep '^timeout=' "$sf" 2>/dev/null | cut -d'=' -f2)
+            timeout=$(grep '^timeout='      "$sf" 2>/dev/null | cut -d'=' -f2)
             counter_left=$(grep '^counter_left=' "$sf" 2>/dev/null | cut -d'=' -f2)
             counter_init=$(grep '^counter_init=' "$sf" 2>/dev/null | cut -d'=' -f2)
         else
-            last_active=0
-            timeout=60
-            counter_left=0
-            counter_init=0
+            last_active=0; timeout=60; counter_left=0; counter_init=0
         fi
 
         is_numeric "$last_active" || last_active=0
-        is_numeric "$timeout" || timeout=60
+        is_numeric "$timeout"     || timeout=60
         is_numeric "$counter_left" || counter_left=0
         is_numeric "$counter_init" || counter_init=0
 
         remaining=$(( last_active + timeout - now ))
         [ "$remaining" -lt 0 ] && remaining=0
 
-        if pkg_is_running "$pkg"; then
-            running="true"
-        else
-            running="false"
-        fi
+        if pkg_is_running "$pkg"; then running="true"; else running="false"; fi
 
-        if [ "$first" = true ]; then
-            first=false
-        else
-            result="${result},"
-        fi
-
+        if [ "$first" = true ]; then first=false; else result="${result},"; fi
         result="${result}{\"pkg\":\"${pkg}\",\"mode\":\"${mode}\",\"timeout\":${timeout},\"remaining\":${remaining},\"running\":${running},\"counter_left\":${counter_left},\"counter_init\":${counter_init}}"
     done < "$tmp_apps"
 
@@ -157,7 +130,6 @@ appstate)
     ok "$result"
     ;;
 
-# ── 读取 apps.conf ───────────────────────────────────────────
 get_apps_conf)
     if [ ! -f "$APPS_CONF" ]; then
         fail "apps.conf 不存在"
@@ -167,21 +139,16 @@ get_apps_conf)
     fi
     ;;
 
-# ── 保存 apps.conf ───────────────────────────────────────────
 save_apps_conf)
     [ -z "$2" ] && fail "内容为空" && exit 0
     content=$(echo "$2" | base64 -d 2>/dev/null)
-    if [ -z "$content" ]; then
-        fail "base64解码失败"
-        exit 0
-    fi
+    if [ -z "$content" ]; then fail "base64解码失败"; exit 0; fi
     cp "$APPS_CONF" "${APPS_CONF}.bak" 2>/dev/null
     printf '%s' "$content" > "$APPS_CONF"
     chmod 644 "$APPS_CONF"
     ok '"saved"'
     ;;
 
-# ── 读取 trim_keep.conf 整体 ─────────────────────────────────
 get_keep_conf)
     if [ ! -f "$KEEP_CONF" ]; then
         fail "trim_keep.conf 不存在"
@@ -191,89 +158,59 @@ get_keep_conf)
     fi
     ;;
 
-# ── 保存 trim_keep.conf 整体 ─────────────────────────────────
 save_keep_conf)
     [ -z "$2" ] && fail "内容为空" && exit 0
     content=$(echo "$2" | base64 -d 2>/dev/null)
-    if [ -z "$content" ]; then
-        fail "base64解码失败"
-        exit 0
-    fi
+    if [ -z "$content" ]; then fail "base64解码失败"; exit 0; fi
     cp "$KEEP_CONF" "${KEEP_CONF}.bak" 2>/dev/null
     printf '%s' "$content" > "$KEEP_CONF"
     chmod 644 "$KEEP_CONF"
     ok '"saved"'
     ;;
 
-# ── 读取某包名的保留进程 ─────────────────────────────────────
 get_keep_procs)
     pkg="$2"
     [ -z "$pkg" ] && fail "缺少包名" && exit 0
     [ -f "$KEEP_CONF" ] || { ok '""'; exit 0; }
-
     result=$(awk -v pkg="$pkg" '
         /^# .*\(/ {
-            if (index($0, "("pkg")") > 0) {
-                in_block = 1
-                next
-            } else {
-                in_block = 0
-            }
+            if (index($0, "("pkg")") > 0) { in_block=1; next }
+            else { in_block=0 }
         }
-        /^#/ {
-            if (in_block) in_block = 0
-        }
-        in_block && NF > 0 && !/^#/ {
-            print $0
-        }
+        /^#/ { if (in_block) in_block=0 }
+        in_block && NF > 0 && !/^#/ { print $0 }
     ' "$KEEP_CONF")
     content=$(printf "%s" "$result" | to_json_str)
     ok "\"${content}\""
     ;;
 
-# ── 保存某包名的保留进程 ─────────────────────────────────────
 save_keep_procs)
     pkg="$2"
     note="$3"
     encoded="$4"
     [ -z "$pkg" ] && fail "缺少包名" && exit 0
-
     new_procs=$(echo "$encoded" | base64 -d 2>/dev/null | sed '/^[[:space:]]*$/d; /^#/d')
-    [ -z "$new_procs" ] && new_procs=""
-
     [ -f "$KEEP_CONF" ] || touch "$KEEP_CONF"
-
     TMP=$(mktemp)
     awk -v pkg="$pkg" '
-        BEGIN { in_block = 0 }
+        BEGIN { in_block=0 }
         /^# .*\(/ {
-            if (index($0, "("pkg")") > 0) {
-                in_block = 1
-                next
-            } else if (in_block) {
-                in_block = 0
-                print
-            } else {
-                print
-            }
-            next
+            if (index($0, "("pkg")") > 0) { in_block=1; next }
+            else if (in_block) { in_block=0; print; next }
+            else { print; next }
         }
         in_block { next }
         { print }
     ' "$KEEP_CONF" > "$TMP"
-
     if [ -n "$new_procs" ]; then
-        [ -s "$TMP" ] && [ "$(tail -c1 "$TMP")" != "" ] && echo >> "$TMP"
         printf "\n# %s (%s)\n" "$note" "$pkg" >> "$TMP"
         printf "%s\n" "$new_procs" >> "$TMP"
     fi
-
     mv "$TMP" "$KEEP_CONF"
     chmod 644 "$KEEP_CONF"
     ok '"saved"'
     ;;
 
-# ── 切换 App 启用状态 ────────────────────────────────────────
 toggle_app)
     pkg="$2"
     [ -z "$pkg" ] && fail "缺少包名" && exit 0
@@ -288,7 +225,6 @@ toggle_app)
     fi
     ;;
 
-# ── 修改 App 参数（支持传入备注）────────────────────────────────
 update_app)
     pkg="$2" mode="$3" slot="$4" counter="$5" flags="$6" note="$7"
     [ -z "$pkg" ]  && fail "缺少包名"     && exit 0
@@ -305,7 +241,6 @@ update_app)
         }')
         [ -z "$note" ] && note=$(echo "$pkg" | awk -F'.' '{print $NF}')
     fi
-
     note=$(echo "$note" | tr ' ' '_')
 
     if grep -qE "^#? *[TKM] ${pkg} " "$APPS_CONF" 2>/dev/null; then
@@ -325,30 +260,26 @@ update_app)
     fi
     ;;
 
-# ── 服务控制（使用 flag 文件 + 信号，无需管道）───────────────
 reload)
     pid=$(get_pid)
-    if [ $? -ne 0 ]; then
-        fail "服务未运行 (${pid})"
-        exit 0
-    fi
+    if [ $? -ne 0 ]; then fail "服务未运行 (${pid})"; exit 0; fi
     touch "$RELOAD_FLAG"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 热重载配置" >> "$OP_LOG"
     ok '"reloading"'
     ;;
 
 rescan)
     pid=$(get_pid)
-    if [ $? -ne 0 ]; then
-        fail "服务未运行 (${pid})"
-        exit 0
-    fi
+    if [ $? -ne 0 ]; then fail "服务未运行 (${pid})"; exit 0; fi
     touch "$RESCAN_FLAG"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 重新扫描已安装 App" >> "$OP_LOG"
     ok '"rescanning"'
     ;;
 
 restart)
     pid=$(get_pid)
     if [ $? -eq 0 ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 服务重启 - 停止旧进程 (PID=${pid})" >> "$OP_LOG"
         kill -TERM "$pid" 2>/dev/null
         sleep 1
         kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
@@ -362,6 +293,7 @@ restart)
     done
     pid=$(get_pid)
     if [ $? -eq 0 ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 服务重启完成 (PID=${pid})" >> "$OP_LOG"
         ok "{\"pid\":${pid}}"
     else
         fail "启动失败，请查看 boot.log"
@@ -370,10 +302,8 @@ restart)
 
 stop)
     pid=$(get_pid)
-    if [ $? -ne 0 ]; then
-        fail "服务未运行 (${pid})"
-        exit 0
-    fi
+    if [ $? -ne 0 ]; then fail "服务未运行 (${pid})"; exit 0; fi
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 服务停止 (PID=${pid})" >> "$OP_LOG"
     kill -TERM "$pid" 2>/dev/null && ok '"stopped"' || fail "发送信号失败"
     ;;
 

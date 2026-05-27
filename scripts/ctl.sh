@@ -1,13 +1,12 @@
 #!/system/bin/sh
-# bg_manager 控制脚本
-# 用法: ctl.sh <reload|rescan|restart|stop|status|log|oplog>
 
-MODDIR="${0%/*}/.."
-LOG_DIR="/data/local/tmp/bg_manager"
+MODDIR="/data/adb/modules/bg_manager"
+LOG_DIR="$MODDIR/logs"
 PID_FILE="$LOG_DIR/main.pid"
 LOG_FILE="$LOG_DIR/bg_manager.log"
 OP_LOG="$LOG_DIR/operations.log"
 
+# 其余内容不变
 get_pid() {
     [ -f "$PID_FILE" ] || return 1
     local pid

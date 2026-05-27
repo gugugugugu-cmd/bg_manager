@@ -6,11 +6,12 @@ CONFIG_DIR="$MODDIR/config"
 APPS_CONF="$CONFIG_DIR/apps.conf"
 KEEP_CONF="$CONFIG_DIR/trim_keep.conf"
 
-LOG_DIR="/data/local/tmp/bg_manager"
+LOG_DIR="$MODDIR/logs"
 PID_FILE="$LOG_DIR/main.pid"
 STATE_DIR="$LOG_DIR/state"
 RELOAD_FLAG="$LOG_DIR/reload.flag"
 RESCAN_FLAG="$LOG_DIR/rescan.flag"
+APPS_PARSED="$LOG_DIR/apps_parsed.tmp"
 
 mkdir -p "$LOG_DIR" "$STATE_DIR"
 echo $$ > "$PID_FILE"
@@ -20,15 +21,13 @@ echo $$ > "$PID_FILE"
 . "$SCRIPTS/killer.sh"
 
 log "========== bg_manager 启动 PID=$$ =========="
+op_log "服务启动 (PID=$$)"
 log "等待 20 秒让系统稳定..."
 sleep 20
 log "开始工作..."
 
 # ── 配置解析 ────────────────────────────────────────────────
 
-APPS_PARSED="$LOG_DIR/apps_parsed.tmp"
-
-# ========== 替换后的 load_config ==========
 load_config() {
     log "加载配置..."
     TIME_CONFIG=$(parse_time_config "$APPS_CONF")
@@ -43,7 +42,6 @@ load_config() {
 
     while IFS=' ' read -r mode pkg note slot counter flags; do
         [ -z "$pkg" ] && continue
-
         echo "$pkg" >> "$valid_pkgs_tmp"
 
         local sf="$STATE_DIR/${pkg}.state"
@@ -57,10 +55,9 @@ load_config() {
         else
             sed -i \
                 -e "s/^timeout=.*/timeout=${timeout_sec}/" \
-                -e "s/^mode=.*/mode=${mode}/" \
-                -e "s/^flags=.*/flags=${flags}/" \
+                -e "s/^mode=.*/mode=${mode}/"             \
+                -e "s/^flags=.*/flags=${flags}/"           \
                 "$sf"
-
             local old_init
             old_init=$(grep '^counter_init=' "$sf" 2>/dev/null | cut -d'=' -f2)
             if [ "$old_init" != "$counter" ]; then
@@ -70,11 +67,9 @@ load_config() {
                     "$sf"
             fi
         fi
-
         count=$(( count + 1 ))
     done < "$APPS_PARSED"
 
-    # 清理已经不在当前启用配置中的旧 state / label
     for sf in "$STATE_DIR"/*.state; do
         [ -f "$sf" ] || continue
         local old_pkg
@@ -86,11 +81,9 @@ load_config() {
     done
 
     rm -f "$valid_pkgs_tmp"
-
     log "配置加载完成: BASE=${BASE_TIME}s STEP=${STEP_TIME}s 共${count}个App"
     rm -f "$RELOAD_FLAG"
 }
-# ========== 替换结束 ==========
 
 # ── state 读写 ───────────────────────────────────────────────
 
@@ -267,10 +260,12 @@ monitor_logcat() {
 
 check_flags() {
     if [ -f "$RELOAD_FLAG" ]; then
+        op_log "热重载配置"
         log "执行热重载"
         load_config
     fi
     if [ -f "$RESCAN_FLAG" ]; then
+        op_log "重新扫描已安装 App"
         log "执行重新扫描"
         rm -f "$RESCAN_FLAG"
         sh "$SCRIPTS/init_config.sh"
@@ -281,6 +276,7 @@ check_flags() {
 # ── 清理 ─────────────────────────────────────────────────────
 
 cleanup() {
+    op_log "服务停止 (PID=$$)"
     log "退出，清理子进程..."
     kill "$SCREEN_PID" "$LOGCAT_PID" 2>/dev/null
     rm -f "$PID_FILE"

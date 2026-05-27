@@ -1,13 +1,13 @@
-# service.sh 完整修复版
 #!/system/bin/sh
 
 MODDIR="/data/adb/modules/bg_manager"
 SCRIPTS="$MODDIR/scripts"
-LOG_DIR="/data/local/tmp/bg_manager"
+LOG_DIR="$MODDIR/logs"
 LOG="$LOG_DIR/boot.log"
 
 mkdir -p "$LOG_DIR"
 
+# 其余内容不变
 log_boot() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"
 }
