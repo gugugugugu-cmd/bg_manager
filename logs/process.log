@@ -1,0 +1,38 @@
+[2026-05-27 10:26:54] TRIM music(com.luna.music)
+  PID=23909 com.luna.music
+---------------
+[2026-05-27 10:26:54] TRIM music(com.luna.music)
+  PID=23909 com.luna.music
+---------------
+[2026-05-27 10:26:54] TRIM music(com.luna.music)
+  PID=23909 com.luna.music
+---------------
+[2026-05-27 10:26:54] TRIM music(com.luna.music)
+  PID=23909 com.luna.music
+---------------
+[2026-05-27 10:45:46] KILL music(com.luna.music)
+  PID=24374 com.luna.music
+  PID=26730 com.luna.music:sandboxed_process0
+---------------
+[2026-05-27 10:45:52] KILL market(com.coolapk.market)
+  PID=618 com.coolapk.market:xg_vip_service
+  PID=32753 com.coolapk.market
+---------------
+[2026-05-27 10:45:52] KILL market(com.coolapk.market)
+  PID=618 com.coolapk.market:xg_vip_service
+---------------
+[2026-05-27 10:47:26] KILL music(com.luna.music)
+  PID=7744 com.luna.music
+---------------
+[2026-05-27 10:56:20] KILL music(com.luna.music)
+  PID=11007 com.luna.music
+---------------
+[2026-05-27 10:56:40] KILL music(com.luna.music)
+  PID=15080 com.luna.music
+---------------
+[2026-05-27 11:02:18] KILL music(com.luna.music)
+  PID=16223 com.luna.music
+---------------
+[2026-05-27 11:05:41] TRIM mm(com.tencent.mm)
+  PID=32010 com.tencent.mm
+---------------

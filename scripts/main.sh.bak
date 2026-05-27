@@ -159,7 +159,6 @@ process_pkg() {
     should_skip "$pkg" "$check_flags" "$effective_mode" && return
     do_process_with_counter "$pkg" "$effective_mode"
 }
-
 check_all_apps() {
     local now checked=0 processed=0
     now=$(date +%s)

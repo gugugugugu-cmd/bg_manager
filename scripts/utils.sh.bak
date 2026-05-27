@@ -100,17 +100,7 @@ get_main_pid() {
 
 is_pkg_running() {
     local pkg="$1"
-    # 精确匹配进程名，避免子字符串误判
-    ps -A 2>/dev/null | awk -v p="$pkg" '
-        {
-            n = $NF
-            # 匹配主进程（进程名==包名）或子进程（包名:xxx）
-            if (n == p || index(n, p":") == 1) {
-                found=1; exit
-            }
-        }
-        END { exit(found ? 0 : 1) }
-    '
+    ps -A 2>/dev/null | grep -q "$pkg"
 }
 
 DUMP_TIMEOUT=4

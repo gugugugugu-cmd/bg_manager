@@ -30,7 +30,9 @@ is_foreground() {
 has_audio_focus() {
     local pkg="$1"
 
-    # 主要：media_session 播放状态，state=3 = PLAYING
+    # 主要方式：media_session 播放状态
+    # state=3 = PLAYING，state=2 = PAUSED，state=1 = STOPPED
+    # 只有 PLAYING 才认为有音频活动，PAUSED 不保护
     local is_playing
     is_playing=$(timeout 3 dumpsys media_session 2>/dev/null | awk -v pkg="$pkg" '
         /package=/ { in_pkg = ($0 ~ pkg) }
@@ -40,9 +42,11 @@ has_audio_focus() {
             in_pkg = 0
         }
     ' | head -1)
+
     [ "$is_playing" = "1" ] && return 0
 
-    # 备用：AudioFocus stack 当前持有者
+    # 备用方式：AudioFocus stack 当前持有者
+    # 防止 media_session 更新延迟的极端情况
     local focus_line
     focus_line=$(safe_dumpsys audio | awk '
         /Audio Focus stack entries/ { in_block=1; next }
@@ -53,6 +57,7 @@ has_audio_focus() {
 
     return 1
 }
+
 # 检查包名是否有可见通知
 has_notification() {
     local pkg="$1"

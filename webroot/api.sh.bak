@@ -99,7 +99,6 @@ appstate)
         [ -z "$line" ] && continue
         mode=$(echo "$line" | awk '{print $1}')
         pkg=$(echo "$line"  | awk '{print $2}')
-        note=$(echo "$line" | awk '{print $3}')   # 新增
         [ -z "$pkg" ] && continue
 
         sf="$STATE_DIR/${pkg}.state"
@@ -122,11 +121,8 @@ appstate)
 
         if pkg_is_running "$pkg"; then running="true"; else running="false"; fi
 
-        # note 转义（防止含特殊字符破坏 JSON）
-        note_safe=$(echo "$note" | sed 's/"/\\"/g')
-
         if [ "$first" = true ]; then first=false; else result="${result},"; fi
-        result="${result}{\"pkg\":\"${pkg}\",\"note\":\"${note_safe}\",\"mode\":\"${mode}\",\"timeout\":${timeout},\"remaining\":${remaining},\"running\":${running},\"counter_left\":${counter_left},\"counter_init\":${counter_init}}"
+        result="${result}{\"pkg\":\"${pkg}\",\"mode\":\"${mode}\",\"timeout\":${timeout},\"remaining\":${remaining},\"running\":${running},\"counter_left\":${counter_left},\"counter_init\":${counter_init}}"
     done < "$tmp_apps"
 
     rm -f "$tmp_apps"

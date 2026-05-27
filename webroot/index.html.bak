@@ -480,21 +480,17 @@ function loadAppState() {
         var pct = isRunning
             ? Math.max(0, Math.min(100, 100 - (parseInt(a.remaining) / parseInt(a.timeout) * 100)))
             : 0;
-        var opacity  = isRunning ? '1' : '0.4';
-        var timeText = isRunning ? fmtTime(a.remaining) : '未运行';
-        var barColor = isRunning ? 'var(--accent)' : 'var(--text2)';
-        var label    = a.note || a.pkg;   // 优先用备注，没有则降级用包名
-
-        return '<div style="margin-bottom:12px;opacity:' + opacity + '">' +
-            '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">' +
-              '<span style="font-size:13px;font-weight:500;color:var(--text)">' + label + '</span>' +
-              '<span style="font-size:11px;color:var(--text2)">' + timeText + '</span>' +
+        var opacity   = isRunning ? '1' : '0.4';
+        var timeText  = isRunning ? fmtTime(a.remaining) : '未运行';
+        var barColor  = isRunning ? 'var(--accent)' : 'var(--text2)';
+        return '<div style="margin-bottom:10px;opacity:' + opacity + '">' +
+            '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
+            '<span style="font-size:12px;color:var(--text)">' + a.pkg + '</span>' +
+            '<span style="font-size:11px;color:var(--text2)">' + timeText + '</span>' +
             '</div>' +
-            '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">' + a.pkg + '</div>' +
             '<div class="progress-bar">' +
-              '<div class="progress-fill" style="width:' + pct + '%;background:' + barColor + '"></div>' +
-            '</div>' +
-            '</div>';
+            '<div class="progress-fill" style="width:' + pct + '%;background:' + barColor + '"></div>' +
+            '</div></div>';
     }).join('');
 }
 
